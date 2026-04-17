@@ -1,0 +1,8 @@
+{
+  "name": "legal",
+  "version": "2.0.0-br",
+  "description": "Plugin jurídico em PT-BR para advogados brasileiros. Acelera análise de processos judiciais (pequenos, médios e extensos com 1000+ páginas), revisão contratual, triagem de NDAs, compliance (LGPD, CDC, Lei Anticorrupção) e elaboração de pareceres — alinhado ao ordenamento jurídico brasileiro (CF/88, CPC/2015, CC/2002, CLT, CDC, LGPD, Lei das S.A.). Diretriz inegociável: a IA jamais fantasia, extrapola fatos ou inventa jurisprudência/doutrina.",
+  "author": {
+    "name": "Anthropic"
+  }
+}
