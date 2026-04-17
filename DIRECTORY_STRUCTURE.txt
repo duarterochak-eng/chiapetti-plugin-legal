@@ -1,0 +1,157 @@
+chiapetti-plugin-legal/
+│
+├── .github/
+│   └── workflows/
+│       └── deploy.yml                    ← GitHub Actions auto-deploy (COPIE deploy.yml aqui)
+│
+├── plugin/                               ← RAIZ do plugin (obrigatório)
+│   ├── plugin.json                       ← Metadados do plugin (OBRIGATÓRIO)
+│   │   {
+│   │     "name": "chiapetti-legal-plugin",
+│   │     "version": "0.1.0",
+│   │     "description": "Plugin de análise jurídica...",
+│   │     "author": { "name": "Chiapetti Advogados" },
+│   │     "keywords": ["legal", "análise", "contratos"],
+│   │     "skills": [...]
+│   │   }
+│   │
+│   ├── SKILL.md                          ← Documentação principal do plugin (opcional)
+│   │
+│   └── skills/                           ← Pasta de skills (obrigatória se plugin tem skills)
+│       │
+│       ├── analise-processo/
+│       │   ├── SKILL.md                  ← Documentação da skill
+│       │   ├── prompt.md                 ← Prompt de system (se aplicável)
+│       │   └── reference/                ← Arquivos de referência (opcional)
+│       │       ├── jurisprudencia.txt
+│       │       └── lei-civil.txt
+│       │
+│       ├── review-contract/
+│       │   ├── SKILL.md
+│       │   ├── prompt.md
+│       │   └── reference/
+│       │       ├── playbook-chiapetti.md
+│       │       ├── red-lines-template.md
+│       │       └── clausulas-posicoes.json
+│       │
+│       ├── triage-nda/
+│       │   ├── SKILL.md
+│       │   ├── prompt.md
+│       │   └── reference/
+│       │       └── nda-red-flags.json
+│       │
+│       ├── compliance-check/
+│       │   ├── SKILL.md
+│       │   ├── prompt.md
+│       │   └── reference/
+│       │       ├── lgpd-checklist.md
+│       │       ├── regulacao-setorial.json
+│       │       └── lei-anticorrup.txt
+│       │
+│       ├── legal-risk-assessment/
+│       │   ├── SKILL.md
+│       │   ├── prompt.md
+│       │   └── reference/
+│       │       └── matriz-risco.json
+│       │
+│       ├── meeting-briefing/
+│       │   ├── SKILL.md
+│       │   └── prompt.md
+│       │
+│       └── vendor-check/
+│           ├── SKILL.md
+│           ├── prompt.md
+│           └── reference/
+│               └── vendor-checklist.md
+│
+├── docs/                                 ← Documentação adicional (opcional)
+│   ├── README.md                         ← Guia de uso
+│   ├── CONTRIBUTING.md                   ← Instruções para contribuidores
+│   ├── FAQ.md                            ← Perguntas frequentes
+│   └── TROUBLESHOOTING.md                ← Resolução de problemas
+│
+├── .gitignore                            ← (COPIE o .gitignore fornecido)
+│
+├── VERSION                               ← Arquivo com versão atual (auto-gerado)
+│                                          Contém: 0.1.0
+│
+├── README.md                             ← README da raiz (COPIE README_PLUGIN.md para aqui)
+│
+└── CHANGELOG.md                          ← Histórico de versões (COPIE o fornecido)
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+ARQUIVOS QUE VOCÊ DEVE COPIAR (fornecidos neste pacote):
+
+1. deploy.yml                 → .github/workflows/deploy.yml
+2. .gitignore               → .gitignore (raiz)
+3. README_PLUGIN.md         → README.md (raiz)
+4. CHANGELOG.md             → CHANGELOG.md (raiz)
+
+═════════════════════════════════════════════════════════════════════════════════
+
+ESTRUTURA MÍNIMA (para começar):
+
+chiapetti-plugin-legal/
+├── .github/workflows/deploy.yml
+├── .gitignore
+├── VERSION
+├── README.md
+├── CHANGELOG.md
+└── plugin/
+    ├── plugin.json
+    └── skills/
+        ├── analise-processo/SKILL.md
+        ├── review-contract/SKILL.md
+        └── ... (suas skills)
+
+═════════════════════════════════════════════════════════════════════════════════
+
+FLUXO VISUAL: Da Edição ao Deploy Automático
+
+LOCAL (seu PC)
+   ↓
+   git edit → git add → git commit → git push origin main
+   ↓
+GITHUB (repositório remoto)
+   ↓
+   GitHub Actions dispara (workflow: deploy.yml)
+   ↓
+   ✓ Valida structure (plugin.json válido?)
+   ✓ Calcula versão (feat/fix/docs)
+   ✓ Atualiza VERSION
+   ✓ Cria git tag (v0.2.0)
+   ✓ Empacota plugin-v0.2.0.zip
+   ✓ Publica Release
+   ↓
+RELEASE (disponível para consumo)
+   ↓
+   URL: https://github.com/seu-usuario/chiapetti-plugin-legal/releases/latest/download/plugin.zip
+   ↓
+CLAUDE COWORK
+   ↓
+   Plugin se atualiza automaticamente (próxima inicialização)
+
+═════════════════════════════════════════════════════════════════════════════════
+
+EDITAR ARQUIVO: Passos Concretos
+
+1. Abra editor (VS Code, Notepad++, etc.)
+2. Abra arquivo:
+   C:\Users\seu-usuario\chiapetti-plugin-legal\plugin\skills\analise-processo\SKILL.md
+
+3. Edite conteúdo
+
+4. Salve (Ctrl+S)
+
+5. Abra terminal/PowerShell em: C:\Users\seu-usuario\chiapetti-plugin-legal\
+
+6. Rode:
+   git add plugin/skills/analise-processo/SKILL.md
+   git commit -m "fix: improve risk assessment logic"
+   git push origin main
+
+7. ✓ Deploy automático começa
+
+═════════════════════════════════════════════════════════════════════════════════
