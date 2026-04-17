@@ -1,9 +1,8 @@
 {
-  "name": "cowork-starter-pack",
-  "version": "0.1.0",
-  "description": "Get started with Claude Cowork in 5 minutes. Sets up a workspace, teaches Claude who you are, and gives you a daily workflow for setting goals, solving problems, and shipping output.",
+  "name": "chiapetti-legal",
+  "version": "0.2.0",
+  "description": "Plugin Claude para análise jurídica — Chiapetti Advogados",
   "author": {
-    "name": "KJ"
-  },
-  "keywords": ["starter", "setup", "productivity", "workflow", "beginner"]
+    "name": "Chiapetti Advogados"
+  }
 }
