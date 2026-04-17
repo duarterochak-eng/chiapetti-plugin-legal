@@ -126,21 +126,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 9. Notificação de sucesso (opcional: webhook)
-      - name: Notify deployment (optional)
-        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' }}
-        run: |
-          curl -X POST ${{ secrets.DEPLOY_WEBHOOK_URL }} \
-            -H "Content-Type: application/json" \
-            -d '{
-              "event": "plugin_deployed",
-              "version": "${{ steps.bump.outputs.new_version }}",
-              "repository": "${{ github.repository }}",
-              "commit": "${{ github.sha }}",
-              "download_url": "https://github.com/${{ github.repository }}/releases/download/v${{ steps.bump.outputs.new_version }}/plugin-v${{ steps.bump.outputs.new_version }}.zip"
-            }'
-        continue-on-error: true
-
   # Job complementar: validar estrutura do plugin
   validate-plugin:
     runs-on: ubuntu-latest
@@ -150,8 +135,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check plugin.json syntax
-        run: |
-          if [ -f plugin/plugin.json ]; then
+        run          if [ -f plugin/plugin.json ]; then
             python3 -m json.tool plugin/plugin.json > /dev/null && echo "✓ plugin.json válido"
           else
             echo "✗ plugin.json não encontrado em plugin/"
