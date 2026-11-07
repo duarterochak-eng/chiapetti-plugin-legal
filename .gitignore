@@ -38,3 +38,9 @@ secrets/
 
 # Plugin generated
 plugin-v*.zip
+
+# Despesas pessoais: nunca versionar extratos/faturas nem dados locais
+despesas/**/*.csv
+despesas/**/*.ofx
+despesas/**/*.pdf
+despesas/dados/
