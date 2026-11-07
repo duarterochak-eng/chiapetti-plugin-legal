@@ -257,11 +257,26 @@ class Banco:
             if not self.db.execute("SELECT 1 FROM lancamentos WHERE mes_ref=? AND categoria=? AND tipo='despesa' LIMIT 1",
                                    (mes, e["categoria"])).fetchone():
                 avisos.append(f"esperado e não encontrado: {e['nome']} ({sf._brl(Decimal(e['valor']))})")
+            desde = e.get("desde")
+            if desde and mes >= desde:  # dívida acumulada: meses devidos x valor, menos o que foi pago
+                (ya, ma), (yb, mb) = map(int, desde.split("-")), (ano, m)
+                n = (yb * 12 + mb) - (ya * 12 + ma) + 1
+                pago = sum((abs(Decimal(r[0])) for r in self.db.execute(
+                    "SELECT valor FROM lancamentos WHERE categoria=? AND tipo='despesa' AND mes_ref>=? AND mes_ref<=?",
+                    (e["categoria"], desde, mes))), ZERO)
+                aberto = Decimal(e["valor"]) * n - pago
+                if aberto > 0:
+                    avisos.append(f"em aberto: {e['nome']} {sf._brl(aberto)} ({n} mês(es) desde {desde}, "
+                                  f"pago {sf._brl(pago)})")
         pend = [r for r in rows if r["status"] == "pendente"]
         if pend:
             avisos.append(f"{len(pend)} lançamento(s) a explicar ({sf._brl(sum(abs(Decimal(r['valor'])) for r in pend))})")
         tot_in, tot_out = sum(entrou.values(), ZERO), sum(gastou.values(), ZERO)
-        return {"mes": mes, "entrou": tot_in, "entrou_por_cat": dict(sorted(entrou.items(), key=lambda kv: -kv[1])),
+        a_vencer: dict[str, Decimal] = defaultdict(Decimal)
+        for p in self.parcelas():
+            a_vencer[p["cat"]] += p["saldo"]
+        return {"mes": mes, "parcelas_a_vencer": dict(sorted(a_vencer.items(), key=lambda kv: -kv[1])),
+                "entrou": tot_in, "entrou_por_cat": dict(sorted(entrou.items(), key=lambda kv: -kv[1])),
                 "entradas_a_confirmar": a_confirmar, "gastou": tot_out, "gastou_por_grupo": grupos,
                 "fora_do_calculo": dict(fora), "saldo": tot_in - tot_out, "avisos": avisos}
 
@@ -279,6 +294,22 @@ class Banco:
                 incompletos.append(m)
         return {"ano": ano, "meses": linhas, "entrou": tin, "gastou": tout, "saldo": tin - tout,
                 "grupos": dict(sorted(grupos.items(), key=lambda kv: -kv[1])), "meses_incompletos": incompletos}
+
+    def parcelas(self) -> list[dict]:
+        """Compras parceladas em curso (cartão): última parcela vista de cada compra e saldo a vencer."""
+        ultimo: dict[tuple, dict] = {}
+        for r in self.db.execute("SELECT * FROM lancamentos WHERE origem LIKE 'fatura:%' AND tipo='despesa'"):
+            mt = re.fullmatch(r"(\d+)/(\d+)", r["doc"] or "")
+            if not mt:
+                continue
+            n, t = int(mt.group(1)), int(mt.group(2))
+            k = (r["chave"], r["valor"], t)  # mesma compra: mesmo estabelecimento, valor e total de parcelas
+            if k not in ultimo or n > ultimo[k]["n"]:
+                ultimo[k] = {"n": n, "t": t, "valor": abs(Decimal(r["valor"])), "nome": r["descricao"],
+                             "cat": r["categoria"], "mes": r["mes_ref"], "id": r["id"]}
+        out = [dict(v, restam=v["t"] - v["n"], saldo=v["valor"] * (v["t"] - v["n"]))
+               for v in ultimo.values() if v["n"] < v["t"]]
+        return sorted(out, key=lambda x: -x["saldo"])
 
     def recorrencias(self, min_meses=2):
         g = defaultdict(lambda: {"meses": set(), "total": ZERO, "n": 0, "cat": "", "tipo": "", "nome": ""})
@@ -306,6 +337,9 @@ def texto_resumo(d: dict) -> str:
         if list(x["itens"]) != [g]:
             out += [f"      {i:<31}{brl(v):>14}" for i, v in x["itens"].items()]
     out.append(f"SOBROU/FALTOU {brl(d['saldo']):>12}")
+    if d["parcelas_a_vencer"]:
+        out.append(f"Parcelas já contratadas, a vencer: {brl(sum(d['parcelas_a_vencer'].values(), ZERO))}")
+        out += [f"      {c:<31}{brl(v):>14}" for c, v in d["parcelas_a_vencer"].items()]
     if d["fora_do_calculo"]:
         nomes = {"transferencia": "transferências próprias", "pagamento_cartao": "pagamento de cartão"}
         out.append("Fora do cálculo (não é gasto): " + "; ".join(f"{nomes[t]} {brl(v)}" for t, v in d["fora_do_calculo"].items()))

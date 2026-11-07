@@ -24,7 +24,6 @@ TAXONOMIA: list[tuple[str, tuple[str, ...]]] = [
     ("Carro › Combustível", ("baratao", "posto", "combust", "ipiranga", "shell")),
     ("Carro › Oficina/Toyota", ("toyota", "oficina", "auto center", "mecanica")),
     ("Carro › IPVA/Licenciamento", ("detran", "ipva", "licenciamento")),
-    ("Carro › Ótica", ("otica",)),
     ("Carro › Seguro", ("seguro auto", "porto seguro", "tokio marine")),
     # Categorias próprias
     ("Loja maçônica", ("augusta e respeitav",)),

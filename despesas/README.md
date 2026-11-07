@@ -13,13 +13,17 @@ e devolve "entrou X, gastou X em ...". Dados ficam em `despesas/dados/` (fora do
     python3 -I despesas/app.py acumulado 2026                  # mês a mês e acumulado do ano
     python3 -I despesas/app.py lancar 20/10/2026 100,00 "Bar e restaurante" "churrasco em dinheiro"
     python3 -I despesas/app.py recorrencias
+    python3 -I despesas/app.py parcelas                         # parceladas em curso e saldo a vencer
 
 ## Categorias (`categorias.py`)
 Casa (Luz, Diarista, Mercado, Lavanderia, Internet, Condomínio, Material de limpeza/Mercado Livre),
-Carro (Lavador, Combustível, Oficina/Toyota, IPVA/Licenciamento, Ótica, Seguro), Loja maçônica,
+Carro (Lavador, Combustível, Oficina/Toyota, IPVA/Licenciamento, Seguro), Loja maçônica,
 Farmácia, Unimed, Bar e restaurante, Kart, Mensalidades (um item por serviço, total no grupo),
 Extraordinárias (limpeza de ar-condicionado, obra do novo escritório). O que não casar é perguntado.
-`config --esperado "Categoria|Nome|VALOR"` avisa quando um valor fixo mensal (ex.: prestação) não aparece.
+`config --esperado "Categoria|Nome|VALOR[|AAAA-MM]"` avisa quando um valor fixo mensal (ex.: prestação) não aparece;
+com `AAAA-MM` acumula a dívida (meses devidos x valor - o que já foi pago).
+`parcelas` lista compras parceladas em curso e o saldo a vencer; o resumo mostra o total por categoria.
+Explicar uma parcela (ex.: como Obra) vale para todas as parcelas, passadas e futuras.
 `explicar ... --valor-exato` cria regra só para aquele valor (ex.: R$ 2.509 ao mesmo favorecido de um repasse menor).
 
 ## Regras do cálculo

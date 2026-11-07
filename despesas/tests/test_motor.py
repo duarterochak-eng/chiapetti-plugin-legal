@@ -17,7 +17,7 @@ import app  # noqa: E402
 import extrato_sicredi as ex  # noqa: E402
 import motor  # noqa: E402
 import sicredi_fatura as sf  # noqa: E402
-from test_sicredi_fatura import LINHAS_B, RESUMO_B, montar  # noqa: E402
+from test_sicredi_fatura import LINHAS_A, LINHAS_B, RESUMO_A, RESUMO_B, montar  # noqa: E402
 
 # Dados 100% fictícios.
 EU, SOCIO, DIARISTA, ITAU = "11111111111", "22222222222", "33333333333", "44444444444444"
@@ -335,6 +335,55 @@ class Grupos(unittest.TestCase):
         self.assertEqual(a["meses"][1]["acumulado"], a["meses"][0]["saldo"] + a["meses"][1]["saldo"])
         self.assertEqual(a["gastou"], sum(m["gastou"] for m in a["meses"]))
         self.assertIn("Casa", a["grupos"])
+
+
+class DividaEParcelas(unittest.TestCase):
+    CAT = "Casa › Condomínio (prestação)"
+
+    def setUp(self):
+        self.b = banco()
+        self.b.importar_extrato(gravar(extrato_txt(OUT)))
+        self.b.cfg["esperados"] = [{"categoria": self.CAT, "nome": "Prestação ao Juarez", "valor": "2500.00",
+                                    "desde": "2026-08"}]
+
+    def aviso_aberto(self, mes="2026-10"):
+        return next((a for a in self.b.resumo(mes)["avisos"] if a.startswith("em aberto")), None)
+
+    def test_divida_acumula_meses_devidos(self):
+        a = self.aviso_aberto()
+        self.assertIn("R$ 7.500,00", a)           # ago, set, out x 2.500
+        self.assertIn("3 mês(es) desde 2026-08", a)
+
+    def test_pagamento_abate_a_divida(self):
+        self.b.lancar(date(2026, 9, 25), D("2500.00"), self.CAT, "Prestação (CEF Juarez)")
+        self.assertIn("R$ 5.000,00", self.aviso_aberto())
+
+    def test_quitando_tudo_some_o_aviso(self):
+        self.b.lancar(date(2026, 10, 25), D("7500.00"), self.CAT, "Prestação atrasada (CEF Juarez)")
+        self.assertIsNone(self.aviso_aberto())
+
+    def test_sem_desde_nao_gera_divida(self):
+        self.b.cfg["esperados"][0].pop("desde")
+        self.assertIsNone(self.aviso_aberto())
+
+    def test_parcelas_a_vencer_e_separacao_como_obra(self):
+        self.b.importar_fatura(gravar(montar(RESUMO_B, LINHAS_B), "fat.csv"), "sicredi-master")
+        ps = self.b.parcelas()
+        self.assertEqual(len(ps), 1)
+        self.assertEqual((ps[0]["n"], ps[0]["t"], ps[0]["restam"], ps[0]["saldo"]), (4, 10, 6, D("600.00")))
+        self.assertEqual(self.b.resumo("2026-10")["parcelas_a_vencer"], {"A classificar": D("600.00")})
+        # avisa uma vez que é obra: vale para todas as parcelas, passadas e futuras
+        explicar_por_nome(self.b, "SOL INDUSTRI", "Extraordinárias › Obra do novo escritório")
+        self.assertEqual(self.b.resumo("2026-10")["parcelas_a_vencer"],
+                         {"Extraordinárias › Obra do novo escritório": D("600.00")})
+        g = self.b.resumo("2026-10")["gastou_por_grupo"]["Extraordinárias"]["itens"]
+        self.assertEqual(g["Obra do novo escritório"], D("100.00"))     # só a parcela do mês
+
+    def test_parcela_quitada_nao_entra(self):
+        self.b.importar_fatura(gravar(montar(RESUMO_A, LINHAS_A), "a.csv"), "sicredi-master")
+        nomes = [p["nome"] for p in self.b.parcelas()]
+        self.assertIn("MERCADOLIVRE MERCAD", nomes)   # 2/3 -> resta 1
+        self.assertNotIn("FOSSIL", nomes)              # 10/10 -> nada a vencer
 
 
 if __name__ == "__main__":

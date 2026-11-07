@@ -4,9 +4,9 @@
   pendentes                                        explicar ID "Categoria" [--tipo T] [--so-este] [--valor-exato]
   resumo AAAA-MM                                   acumulado AAAA
   lancar DD/MM/AAAA VALOR "Categoria" "descrição" [--tipo renda]      (dinheiro, outro banco)
-  recorrencias
+  recorrencias                                     parcelas   (compras parceladas e saldo a vencer)
   config [--documento CPF] [--cartao NOME] [--limite N] [--base fatura|compra]
-         [--esperado "Categoria|Nome|VALOR"]
+         [--esperado "Categoria|Nome|VALOR[|AAAA-MM]"]
 Dados em despesas/dados/ (fora do git).
 """
 import argparse
@@ -41,6 +41,7 @@ def main(argv=None) -> int:
     a = sub.add_parser("lancar"); a.add_argument("data"); a.add_argument("valor"); a.add_argument("categoria")
     a.add_argument("descricao"); a.add_argument("--tipo", default="despesa")
     sub.add_parser("recorrencias")
+    sub.add_parser("parcelas")
     a = sub.add_parser("config"); a.add_argument("--documento", action="append"); a.add_argument("--cartao", action="append")
     a.add_argument("--limite"); a.add_argument("--base", choices=("fatura", "compra")); a.add_argument("--esperado", action="append")
     args = p.parse_args(argv)
@@ -82,6 +83,12 @@ def main(argv=None) -> int:
             d, m, y = map(int, args.data.split("/"))
             b.lancar(motor.date(y, m, d), _valor(args.valor), args.categoria, args.descricao, args.tipo)
             print("lançado")
+        elif args.cmd == "parcelas":
+            ps = b.parcelas()
+            for x in ps:
+                print(f"{x['id'][:8]}  {sf.mascarar(x['nome'])[:30]:<32}{x['cat'][:34]:<36}{x['n']}/{x['t']}  "
+                      f"{sf._brl(x['valor']):>12}  restam {x['restam']} = {sf._brl(x['saldo'])}")
+            print(f"total a vencer: {sf._brl(sum((x['saldo'] for x in ps), motor.ZERO))}" if ps else "nenhuma parcela em curso")
         elif args.cmd == "recorrencias":
             for x in b.recorrencias():
                 print(f"{sf.mascarar(x['nome'])[:34]:<36}{x['cat'][:26]:<28}{len(x['meses'])} meses  média {sf._brl(x['media_mes'])}")
@@ -91,9 +98,11 @@ def main(argv=None) -> int:
             if args.limite: b.cfg["limite_pergunta"] = args.limite
             if args.base: b.cfg["base_cartao"] = args.base
             for e in args.esperado or []:
-                cat, nome, valor = e.split("|")
-                b.cfg["esperados"] = [x for x in b.cfg["esperados"] if x["categoria"] != cat] + \
-                                     [{"categoria": cat, "nome": nome, "valor": str(_valor(valor))}]
+                cat, nome, valor, *desde = e.split("|")
+                novo = {"categoria": cat, "nome": nome, "valor": str(_valor(valor))}
+                if desde and desde[0]:
+                    novo["desde"] = desde[0]  # AAAA-MM: acumula o que ficou devendo desde esse mês
+                b.cfg["esperados"] = [x for x in b.cfg["esperados"] if x["categoria"] != cat] + [novo]
             b.salvar_config()
             print(f"config: {len(b.cfg['meus_documentos'])} documento(s) próprio(s), cartões {b.cfg['cartoes']}, "
                   f"{len(b.cfg['esperados'])} valor(es) esperado(s), pergunta a partir de R$ {b.cfg['limite_pergunta']}, "
