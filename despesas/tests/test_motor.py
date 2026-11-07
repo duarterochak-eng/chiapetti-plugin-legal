@@ -7,7 +7,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import io  # noqa: E402
+import warnings  # noqa: E402
+
+warnings.simplefilter("ignore", ResourceWarning)  # conexões sqlite de teste são descartáveis
 from contextlib import redirect_stdout  # noqa: E402
+from datetime import date  # noqa: E402
 
 import app  # noqa: E402
 import extrato_sicredi as ex  # noqa: E402
@@ -113,9 +117,9 @@ class Classificacao(unittest.TestCase):
         self.assertEqual(self.t["PAGTO FATURA MASTER"]["tipo"], "pagamento_cartao")
         pix_eu = next(r for d, r in self.t.items() if EU in d)
         self.assertEqual(pix_eu["tipo"], "transferencia")
-        self.assertEqual(self.t["CESTA DE RELACIONAMENTO"]["categoria"], "Tarifas bancárias")
+        self.assertEqual(self.t["CESTA DE RELACIONAMENTO"]["categoria"], "Financeiro › Tarifas bancárias")
         mercado = next(r for d, r in self.t.items() if "DEL MORO" in d)
-        self.assertEqual(mercado["categoria"], "Mercado")
+        self.assertEqual(mercado["categoria"], "Casa › Mercado")
 
     def test_so_pergunta_o_que_nao_reconhece_acima_do_limite(self):
         perguntas = {r["descricao"] for r in self.b.pendentes()}
@@ -238,6 +242,99 @@ class Cli(unittest.TestCase):
         self.assertIn("regra congelada", out)
         rc, out = self.rodar(d, "resumo", "2026-10")
         self.assertIn("Obra", out)
+
+
+class Taxonomia(unittest.TestCase):
+    CASOS = {
+        "PAGAMENTO PIX 03467321000199 ENERGISA MT": "Casa › Luz",
+        "LIQUIDACAO BOLETO SICREDI 09144880000144 LCI TEL": "Casa › Internet",
+        "LavanderiaRibeiro": "Casa › Lavanderia",
+        "SUPERMERCADOS MACHAD": "Casa › Mercado",
+        "MERCADOLIVRE MERCAD": "Casa › Material de limpeza (Mercado Livre)",
+        "LavaJatoMoradaDo": "Carro › Lavador",
+        "AUTO POSTO AVANTI": "Carro › Combustível",
+        "PGTO SEFAZ/DETRAN MT": "Carro › IPVA/Licenciamento",
+        "PAGAMENTO PIX 10374305000117 AUGUSTA E RESPEITAV": "Loja maçônica",
+        "LIQUIDACAO BOLETO SICREDI 73967085000155 UNIMED": "Unimed",
+        "SUPREMA FARMA SORRIS": "Farmácia",
+        "PHARMACIA THERAPEUTI": "Farmácia",
+        "ViraCopoPromotora": "Bar e restaurante",
+        "COMPRA DEBITO MASTER CONVENIENCIA ROTA DO S SORR": "Bar e restaurante",
+        "APPLE COM/BILL": "Mensalidades › Apple",
+        "Microsoft Microsoft": "Mensalidades › Microsoft",
+        "ANTHROPIC CLAUDE SU": "Mensalidades › Claude (Anthropic)",
+        "SEGURO PRESTAMISTA": "Financeiro › Tarifas bancárias",
+    }
+
+    def test_sugestoes(self):
+        for desc, cat in self.CASOS.items():
+            self.assertEqual(motor.sugerir(desc), cat, desc)
+
+    def test_nao_reconhece_o_resto(self):
+        for desc in ("MM QUIMICA PRODUTOS", "JIM COM AVANCCE", "MAGAZINE LUIZA SA", "SOL INDUSTRI Cartao"):
+            self.assertIsNone(motor.sugerir(desc), desc)
+
+    def test_grupo_item(self):
+        self.assertEqual(categorias_grupo("Casa › Luz"), ("Casa", "Luz"))
+        self.assertEqual(categorias_grupo("Farmácia"), ("Farmácia", "Farmácia"))
+
+
+def categorias_grupo(c):
+    import categorias
+    return categorias.grupo_item(c)
+
+
+class Grupos(unittest.TestCase):
+    def setUp(self):
+        self.b = banco()
+        self.b.importar_extrato(gravar(extrato_txt(OUT)))
+        self.b.importar_fatura(gravar(montar(RESUMO_B, LINHAS_B), "fat.csv"), "sicredi-master")
+
+    def test_resumo_por_grupo_com_itens(self):
+        g = self.b.resumo("2026-10")["gastou_por_grupo"]
+        self.assertEqual(g["Casa"]["itens"]["Mercado"], D("150.00"))
+        self.assertEqual(g["Farmácia"]["total"], D("170.00"))
+        self.assertEqual(g["Mensalidades"]["itens"], {"Claude (Anthropic)": D("40.00")})
+        self.assertEqual(g["Financeiro"]["itens"]["Encargos de cartão"], D("32.50") + D("30.00"))  # itemizados + não detalhados
+        self.assertNotIn("Casa", {k for k in g if g[k]["total"] < 0})
+
+    def test_valor_exato_distingue_prestacao_de_repasse_ao_mesmo_favorecido(self):
+        b = banco()
+        extra = [("02/10/2026", f"TRANSF ENTRE CONTAS {SOCIO} SOCIO TESTE", "SI1", "-2509.00"),
+                 ("03/10/2026", f"TRANSF ENTRE CONTAS {SOCIO} SOCIO TESTE", "SI2", "-500.00")]
+        b.importar_extrato(gravar(extrato_txt(extra), "x.csv"))
+        pres = b.db.execute("SELECT id FROM lancamentos WHERE valor='-2509.00'").fetchone()["id"]
+        b.explicar(pres, "Casa › Condomínio (prestação)", valor_exato=True)
+        cats = {r["valor"]: r["categoria"] for r in b.db.execute("SELECT valor, categoria FROM lancamentos")}
+        self.assertEqual(cats["-2509.00"], "Casa › Condomínio (prestação)")
+        self.assertEqual(cats["-500.00"], "A classificar")           # o outro valor não é capturado
+        b.importar_extrato(gravar(extrato_txt([("02/11/2026", f"TRANSF ENTRE CONTAS {SOCIO} SOCIO TESTE", "SI3", "-2509.00")],
+                                              periodo="01/11/2026 a 30/11/2026"), "y.csv"))
+        nov = b.db.execute("SELECT categoria, status FROM lancamentos WHERE mes_ref='2026-11'").fetchone()
+        self.assertEqual((nov["categoria"], nov["status"]), ("Casa › Condomínio (prestação)", "regra"))
+
+    def test_esperado_gera_aviso_quando_falta(self):
+        self.b.cfg["esperados"] = [{"categoria": "Casa › Condomínio (prestação)", "nome": "Prestação ao Juarez",
+                                    "valor": "2509.00"}]
+        av = self.b.resumo("2026-10")["avisos"]
+        self.assertTrue(any("esperado e não encontrado: Prestação ao Juarez (R$ 2.509,00)" in a for a in av))
+        self.b.lancar(date(2026, 10, 25), D("2509.00"), "Casa › Condomínio (prestação)", "Prestação (CEF Juarez)")
+        av = self.b.resumo("2026-10")["avisos"]
+        self.assertFalse(any("esperado" in a for a in av))
+
+    def test_lancar_manual_entra_no_resumo(self):
+        antes = self.b.resumo("2026-10")["gastou"]
+        self.b.lancar(date(2026, 10, 20), D("100.00"), "Bar e restaurante", "churrasco em dinheiro")
+        self.b.lancar(date(2026, 10, 20), D("100.00"), "Bar e restaurante", "churrasco em dinheiro")  # idempotente
+        self.assertEqual(self.b.resumo("2026-10")["gastou"] - antes, D("100.00"))
+
+    def test_acumulado(self):
+        self.b.importar_extrato(gravar(extrato_txt(NOV, periodo="01/11/2026 a 30/11/2026"), "n.csv"))
+        a = self.b.acumulado("2026")
+        self.assertEqual([m["mes"] for m in a["meses"]], ["2026-10", "2026-11"])
+        self.assertEqual(a["meses"][1]["acumulado"], a["meses"][0]["saldo"] + a["meses"][1]["saldo"])
+        self.assertEqual(a["gastou"], sum(m["gastou"] for m in a["meses"]))
+        self.assertIn("Casa", a["grupos"])
 
 
 if __name__ == "__main__":
