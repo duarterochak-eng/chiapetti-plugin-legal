@@ -386,5 +386,28 @@ class DividaEParcelas(unittest.TestCase):
         self.assertNotIn("FOSSIL", nomes)              # 10/10 -> nada a vencer
 
 
+class ForaDoNormal(unittest.TestCase):
+    def setUp(self):
+        self.b = banco()
+        for mes, v in (("07", "400"), ("08", "400"), ("09", "1000"), ("10", "450")):
+            self.b.lancar(date(2026, int(mes), 10), D(v), "Bar e restaurante", "Padaria do Ze")
+        self.b.lancar(date(2026, 9, 12), D("300"), "Bar e restaurante", "Lugar Novo")       # sem histórico
+        self.b.lancar(date(2026, 8, 12), D("100"), "Bar e restaurante", "Lugar Recente")
+        self.b.lancar(date(2026, 9, 12), D("900"), "Bar e restaurante", "Lugar Recente")    # só 1 mês antes
+
+    def test_avisa_quando_passa_muito_do_habitual(self):
+        (x,) = self.b.fora_do_normal("2026-09")
+        self.assertEqual((x["nome"], x["atual"], x["media"]), ("Padaria do Ze", D("1000"), D("400.00")))
+        self.assertTrue(any("fora do normal: Padaria do Ze" in a for a in self.b.resumo("2026-09")["avisos"]))
+
+    def test_variacao_pequena_nao_avisa(self):
+        self.assertEqual(self.b.fora_do_normal("2026-10"), [])
+
+    def test_sem_historico_suficiente_nao_avisa(self):
+        nomes = [x["nome"] for x in self.b.fora_do_normal("2026-09")]
+        self.assertNotIn("Lugar Novo", nomes)
+        self.assertNotIn("Lugar Recente", nomes)
+
+
 if __name__ == "__main__":
     unittest.main()

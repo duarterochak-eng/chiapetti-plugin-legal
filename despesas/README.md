@@ -26,6 +26,10 @@ com `AAAA-MM` acumula a dívida (meses devidos x valor - o que já foi pago).
 Explicar uma parcela (ex.: como Obra) vale para todas as parcelas, passadas e futuras.
 `explicar ... --valor-exato` cria regra só para aquele valor (ex.: R$ 2.509 ao mesmo favorecido de um repasse menor).
 
+## Fora do normal
+Para lugares já conhecidos (2+ meses de histórico), o app avisa quando o total do mês passa de 2x a média
+e de R$ 150 acima dela, e pergunta "o que foi?". Com o tempo, os lugares recorrentes ficam conhecidos.
+
 ## Regras do cálculo
 - **Pagamento de fatura, Pix para você mesmo e Pix ao banco do cartão não são gasto**: o gasto está dentro da fatura.
 - **Entrada** só é renda quando explicada (ex.: retirada da PJ); entrada desconhecida fica "a confirmar".

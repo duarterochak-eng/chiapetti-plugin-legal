@@ -32,7 +32,7 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("importar-extrato"); a.add_argument("arq"); a.add_argument("--conta", default="sicredi-pf")
     a = sub.add_parser("importar-fatura"); a.add_argument("arq"); a.add_argument("--cartao", required=True)
-    sub.add_parser("pendentes")
+    a = sub.add_parser("pendentes"); a.add_argument("--mes")
     a = sub.add_parser("explicar"); a.add_argument("id"); a.add_argument("categoria")
     a.add_argument("--tipo", default="despesa"); a.add_argument("--nota", default="")
     a.add_argument("--so-este", action="store_true"); a.add_argument("--valor-exato", action="store_true")
@@ -72,6 +72,13 @@ def main(argv=None) -> int:
                 extra = f"  (+{g['n'] - 1} iguais, total {sf._brl(g['total'])})" if g["n"] > 1 else ""
                 print(f"{r['id'][:8]}  {r['data']}  {sf._brl(v):>14}  {sf.mascarar(r['descricao'])}{extra}  <- o que é?")
             print(f"{len(grupos)} a explicar" if grupos else "nada a explicar")
+            mes = args.mes or (b.db.execute("SELECT MAX(mes_ref) FROM lancamentos").fetchone()[0])
+            fn = b.fora_do_normal(mes) if mes else []
+            if fn:
+                print(f"\nFora do normal em {mes} (valor muito acima do habitual do lugar):")
+                for x in fn:
+                    print(f"  {sf.mascarar(x['nome'])[:34]:<36}{x['categoria'][:26]:<28}"
+                          f"{sf._brl(x['atual'])} (média {sf._brl(x['media'])})  <- o que foi?")
         elif args.cmd == "explicar":
             n = b.explicar(args.id, args.categoria, args.tipo, args.nota, args.so_este, args.valor_exato)
             print(f"ok: {n} lançamento(s) atualizado(s)" + ("" if args.so_este else "; regra congelada para os próximos envios"))

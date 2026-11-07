@@ -268,6 +268,9 @@ class Banco:
                 if aberto > 0:
                     avisos.append(f"em aberto: {e['nome']} {sf._brl(aberto)} ({n} mês(es) desde {desde}, "
                                   f"pago {sf._brl(pago)})")
+        for x in self.fora_do_normal(mes):
+            avisos.append(f"fora do normal: {sf.mascarar(x['nome'])} {sf._brl(x['atual'])} "
+                          f"(média dos meses anteriores {sf._brl(x['media'])}); o que foi?")
         pend = [r for r in rows if r["status"] == "pendente"]
         if pend:
             avisos.append(f"{len(pend)} lançamento(s) a explicar ({sf._brl(sum(abs(Decimal(r['valor'])) for r in pend))})")
@@ -294,6 +297,25 @@ class Banco:
                 incompletos.append(m)
         return {"ano": ano, "meses": linhas, "entrou": tin, "gastou": tout, "saldo": tin - tout,
                 "grupos": dict(sorted(grupos.items(), key=lambda kv: -kv[1])), "meses_incompletos": incompletos}
+
+    def fora_do_normal(self, mes: str, fator=Decimal("2"), minimo=Decimal("150")) -> list[dict]:
+        """Lugares já conhecidos (2+ meses anteriores) cujo total no mês passa muito do habitual."""
+        hist: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+        nome: dict[str, tuple] = {}
+        for r in self.db.execute("SELECT chave, mes_ref, valor, descricao, categoria FROM lancamentos "
+                                 "WHERE tipo='despesa' AND status!='pendente'"):
+            hist[r["chave"]][r["mes_ref"]] += abs(Decimal(r["valor"]))
+            nome[r["chave"]] = (r["descricao"], r["categoria"])
+        out = []
+        for k, meses in hist.items():
+            anteriores = [v for m, v in meses.items() if m < mes]
+            if mes not in meses or len(anteriores) < 2:
+                continue
+            media = sum(anteriores, ZERO) / len(anteriores)
+            if meses[mes] >= media * fator and meses[mes] - media >= minimo:
+                out.append({"nome": nome[k][0], "categoria": nome[k][1], "atual": meses[mes],
+                            "media": media.quantize(Decimal("0.01"))})
+        return sorted(out, key=lambda x: -(x["atual"] - x["media"]))
 
     def parcelas(self) -> list[dict]:
         """Compras parceladas em curso (cartão): última parcela vista de cada compra e saldo a vencer."""
