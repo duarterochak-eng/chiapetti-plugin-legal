@@ -46,7 +46,10 @@ EXTERIOR_HINTS = ("anthropic",)
 CATEGORIAS = {
     "Compras online": ("mercadolivre", "mercado livre", "amazon", "shopee", "magalu", "magazine luiza"),
     "Mercado": ("supermerc", "atacad", "hortifruti", "mercearia"),
-    "Veículo": ("baratao", "posto", "combust", "shell", "ipiranga", "lavajato", "lava jato", "lavego"),
+    "Veículo": ("baratao", "posto", "combust", "shell", "ipiranga", "lavajato", "lava jato", "lavego",
+                "detran"),
+    "Moradia (contas)": ("energisa", "lci tel", "ecovil", "condomin"),
+    "Seguros": ("prudential", "seguro"),
     "Saúde": ("farma", "pharmacia", "drog", "drugstore", "clinica", "laborat", "unimed",
               "biomanip", "formula certa"),
     "Lazer e restaurantes": ("viracopo", "vira copo", "la vie", "taboo", "steak", "restaur", "ifood",
