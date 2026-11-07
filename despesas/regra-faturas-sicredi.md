@@ -17,13 +17,27 @@ Especificação implementada em `sicredi_fatura.py`. Fonte: orientação do titu
 
 ## Classificação
 - `Pag Fat Deb Cc` (negativo): pagamento da fatura anterior, fora dos totais de despesa.
-- `Credito Anuidade Cartao`, `Taxa De Anuidade`, `IOF Compra Internacional`: encargos.
-- Exterior: lançamentos em USD; o IOF vem em linha separada com a mesma data.
-- Parcela presente = parcela em curso, não gasto novo.
+- Outros negativos (`Credito Anuidade Cartao`, estornos): créditos.
+- Encargos/tarifas: anuidade, IOF (inclusive adicional sobre saldo financiado), multa, juros de mora.
+- Exterior: coluna "Valor em Dólar" vem **vazia**; distingue-se pelo estabelecimento (`EXTERIOR_HINTS`).
+  O IOF de compra internacional pode vir em data diferente da compra.
+- Parcela presente = parcela em curso, não gasto novo. Parcela `n/n` = última, sem saldo restante.
+
+## Convenção real do resumo Sicredi (observada em duas faturas)
+- Anuidade, IOF, multa e juros de mora ficam **dentro de "Débitos no Brasil"**.
+- Crédito de anuidade fica em **"Pagamentos / Créditos"**.
+- **"Encargos"** do resumo pode trazer valor não itemizado nos lançamentos (ex.: juros do saldo financiado).
+  Isso gera **aviso** no topo do relatório, não bloqueio.
+- "Pagamento Mínimo" é do cabeçalho e não se confunde com "Pagamentos / Créditos".
+- Cabeçalho: vencimento, valor total (conferido contra o total do resumo) e pagamento mínimo.
+  `saldo financiado se pagar só o mínimo = total - mínimo`.
 
 ## Validação obrigatória
-`fatura anterior + pagamentos/créditos + encargos + débitos Brasil + débitos exterior = total da fatura`,
-e soma dos lançamentos conferida com os campos do resumo. Divergência: reportar a diferença e **parar**.
+`fatura anterior + pagamentos/créditos + encargos + débitos Brasil + débitos exterior = total da fatura`;
+total do cabeçalho = total do resumo; soma dos negativos = pagamentos/créditos; soma dos positivos =
+Brasil + exterior (ou + encargos, se itemizados). Divergência: reportar a diferença e **parar** (erro).
+Diferença exatamente igual a "Encargos" não itemizados: **aviso** visível, análise segue.
+A divisão Brasil/exterior é por estabelecimento e só gera aviso.
 
 ## Privacidade
 - Não imprimir número de cartão, conta ou cooperativa em saída, log ou commit.

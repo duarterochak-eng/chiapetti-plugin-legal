@@ -2,6 +2,13 @@
 
 Regras duras: Decimal (nunca float), conciliação obrigatória antes da análise,
 nenhum dado de identificação (cartão, conta, cooperativa) sai em relatório.
+
+Convenção do resumo Sicredi (observada em faturas reais):
+  * anuidade, IOF, multa e juros de mora aparecem DENTRO de "Débitos no Brasil";
+  * crédito de anuidade aparece em "Pagamentos / Créditos";
+  * "Encargos" pode trazer valor que NÃO está itemizado nos lançamentos;
+  * "Valor em Dólar" vem vazio; o exterior só se distingue pelo estabelecimento;
+  * "Pagamento Mínimo" (cabeçalho) não é "Pagamentos / Créditos" (resumo).
 """
 from __future__ import annotations
 
@@ -16,35 +23,45 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 CENTAVO = Decimal("0.01")
+ZERO = Decimal("0")
 
-# Palavras-chave (sem acento, minúsculas) para localizar os campos do resumo.
-# Rótulos reais ainda não vistos: ajustar aqui após o primeiro CSV real.
-CAMPOS_RESUMO = {
-    "anterior": ("fatura anterior", "saldo anterior"),
-    "pagamentos": ("pagamento", "credito"),
-    "encargos": ("encargo",),
-    "brasil": ("brasil", "nacional"),
-    "exterior": ("exterior", "internacional"),
-    "total": ("total",),
+# Rótulos do resumo, comparados sem acento e em minúsculas.
+RESUMO_REGEX = {
+    "anterior": r"fatura anterior",
+    "pagamentos": r"pagamentos?\s*(?:/|e)\s*creditos?",
+    "encargos": r"\bencargos\b",
+    "brasil": r"no brasil",
+    "exterior": r"no exterior",
+    "total": r"total desta fatura",
 }
+CABECALHO_REGEX = {
+    "total": r"^valor total",
+    "minimo": r"pagamento minimo",
+    "vencimento": r"vencimento",
+}
+# "Valor em Dólar" vem vazio nas faturas reais: exterior só por estabelecimento.
+EXTERIOR_HINTS = ("anthropic",)
 
-# Categorias por palavra-chave na descrição (primeira que casar). Editável.
+# Primeira categoria que casar vence (a ordem importa). Editável.
 CATEGORIAS = {
-    "Mercado": ("supermerc", "mercado", "atacad", "hortifruti"),
-    "Combustível": ("posto", "combust", "shell", "ipiranga"),
-    "Restaurante/Delivery": ("restaur", "ifood", "lanche", "pizza", "burger", "padaria", "cafe"),
-    "Saúde": ("farma", "drog", "clinica", "laborat", "unimed"),
-    "Lazer": ("kart", "cinema", "ingresso", "steam", "playstation", "xbox", "nintendo"),
-    "Compras online": ("mercadolivre", "mercado livre", "amazon", "shopee", "magalu"),
-    "Vestuário/Perfumaria": ("roupa", "calcad", "boticario", "perfum", "renner", "riachuelo"),
-    "Assinaturas": ("netflix", "spotify", "google", "apple", "microsoft", "anthropic", "openai"),
+    "Compras online": ("mercadolivre", "mercado livre", "amazon", "shopee", "magalu", "magazine luiza"),
+    "Mercado": ("supermerc", "atacad", "hortifruti", "mercearia"),
+    "Veículo": ("baratao", "posto", "combust", "shell", "ipiranga", "lavajato", "lava jato", "lavego"),
+    "Saúde": ("farma", "pharmacia", "drog", "drugstore", "clinica", "laborat", "unimed",
+              "biomanip", "formula certa"),
+    "Lazer e restaurantes": ("viracopo", "vira copo", "la vie", "taboo", "steak", "restaur", "ifood",
+                             "lanche", "pizza", "burger", "padaria", "cafe", "acai", "sorvete",
+                             "degustare", "convenienc", "kart", "cinema", "ingresso", "steam",
+                             "playstation", "xbox", "nintendo"),
+    "Assinaturas": ("netflix", "spotify", "google", "apple com", "microsoft", "anthropic", "openai"),
+    "Vestuário e lavanderia": ("lavanderia", "roupa", "calcad", "boticario", "perfum", "renner",
+                               "riachuelo", "fossil"),
     "Transporte": ("uber", "99app", "estacion", "pedagio", "sem parar"),
+    "A identificar (JIM COM)": ("jim com",),
 }
 # Indícios de despesa profissional. Sempre apresentados como "a confirmar".
 INDICIOS_PROFISSIONAIS = ("oab", "anthropic", "openai", "jusbrasil", "cartorio", "papelaria",
-                          "correios", "tribunal", "adobe", "microsoft", "google workspace")
-
-LIMITE_ROTULO = 10
+                          "correios", "tribunal", "adobe", "microsoft")
 
 
 class ConciliacaoError(Exception):
@@ -87,6 +104,10 @@ def mascarar(texto: str) -> str:
     return re.sub(r"\d{6,}", lambda m: "*" * len(m.group(0)), texto)
 
 
+def _brl(v: Decimal) -> str:
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 @dataclass
 class Lancamento:
     data: date
@@ -95,37 +116,47 @@ class Lancamento:
     valor: Decimal
     valor_dolar: Decimal | None
     adicional: bool
-    tipo: str  # compra | exterior | pagamento_fatura | encargo
+    tipo: str  # compra | exterior | encargo | pagamento_fatura | credito
     categoria: str = "A classificar"
     profissional: bool = False
 
     @property
     def saldo_restante(self) -> Decimal:
         if not self.parcela:
-            return Decimal("0")
+            return ZERO
         atual, total = self.parcela
         return (self.valor * (total - atual)).quantize(CENTAVO)
 
 
 @dataclass
 class Fatura:
+    cabecalho: dict[str, str] = field(repr=False)  # identificação: nunca imprimir
     resumo: dict[str, str] = field(repr=False)
-    metadados: dict[str, str] = field(repr=False)  # identificação: nunca imprimir
     lancamentos: list[Lancamento]
 
     def __repr__(self) -> str:  # sem identificação
         return f"Fatura(lancamentos={len(self.lancamentos)})"
 
 
+@dataclass
+class Conciliacao:
+    erros: list[str]
+    avisos: list[str]
+    campos: dict[str, Decimal]
+    encargos_nao_detalhados: Decimal = ZERO
+
+
 def _classificar(desc: str, valor: Decimal, valor_dolar: Decimal | None) -> tuple[str, str, bool]:
     d = _sem_acento(desc)
-    if d.startswith("pag fat") and valor < 0:
-        return "pagamento_fatura", "Pagamento fatura anterior", False
-    if any(k in d for k in ("anuidade", "iof")):
+    if valor < 0:
+        if d.startswith("pag fat"):
+            return "pagamento_fatura", "Pagamento fatura anterior", False
+        return "credito", "Créditos e estornos", False
+    if any(k in d for k in ("anuidade", "iof", "juros", "multa")):
         return "encargo", "Encargos e tarifas", False
-    tipo = "exterior" if (valor_dolar is not None or "anthropic" in d) else "compra"
+    exterior = valor_dolar is not None or any(h in d for h in EXTERIOR_HINTS)
     categoria = next((c for c, ks in CATEGORIAS.items() if any(k in d for k in ks)), "A classificar")
-    return tipo, categoria, any(k in d for k in INDICIOS_PROFISSIONAIS)
+    return ("exterior" if exterior else "compra"), categoria, any(k in d for k in INDICIOS_PROFISSIONAIS)
 
 
 def ler_fatura(caminho: str | Path) -> Fatura:
@@ -151,10 +182,17 @@ def ler_fatura(caminho: str | Path) -> Fatura:
     def cel(c, i):
         return c[i] if i is not None and i < len(c) else ""
 
-    meta: dict[str, str] = {}
+    cabecalho: dict[str, str] = {}
+    resumo: dict[str, str] = {}
+    em_resumo = False
     for c in linhas[:inicio]:
+        if c and _sem_acento(c[0]).startswith("resumo de despesas"):
+            em_resumo = True
+            continue
         if len(c) >= 2 and c[0]:
-            meta[c[0]] = c[1]
+            (resumo if em_resumo else cabecalho)[c[0]] = c[1]
+    if not resumo:  # sem marcador "Resumo de Despesas": usa tudo
+        resumo = dict(cabecalho)
 
     lanc = []
     for c in linhas[inicio + 1:]:
@@ -168,100 +206,134 @@ def ler_fatura(caminho: str | Path) -> Fatura:
         tipo, cat, prof = _classificar(desc, valor, usd)
         lanc.append(Lancamento(parse_data(cel(c, idx["data"])), desc, parse_parcela(cel(c, idx["parcela"])),
                                valor, usd, bool(cel(c, idx_adic)), tipo, cat, prof))
-    return Fatura(resumo=meta, metadados=meta, lancamentos=lanc)
+    return Fatura(cabecalho=cabecalho, resumo=resumo, lancamentos=lanc)
 
 
-def _campo(resumo: dict[str, str], chaves: tuple[str, ...], usados: set[str]) -> tuple[str, Decimal] | None:
-    for k, v in resumo.items():
-        kn = _sem_acento(k)
-        if k in usados or not any(p in kn for p in chaves):
-            continue
-        try:
-            val = parse_valor(v)
-        except ValueError:
-            continue
-        if val is not None:
-            return k, val
+def _buscar(campos: dict[str, str], regex: str) -> Decimal | None:
+    for k, v in campos.items():
+        if re.search(regex, _sem_acento(_limpo(k))):
+            try:
+                val = parse_valor(v)
+            except ValueError:
+                continue
+            if val is not None:
+                return val
     return None
 
 
-def conciliar(f: Fatura) -> list[str]:
-    """Retorna lista de divergências (vazia = concilia). Campos não localizados contam como divergência."""
-    usados: set[str] = set()
+def conciliar(f: Fatura) -> Conciliacao:
+    """Erros bloqueiam a análise; avisos são exibidos no topo do relatório."""
     campos: dict[str, Decimal] = {}
     faltando = []
-    # 'total' é buscado por último e só em chaves ainda não usadas
-    for nome in ("anterior", "pagamentos", "encargos", "brasil", "exterior", "total"):
-        achado = _campo(f.resumo, CAMPOS_RESUMO[nome], usados)
-        if achado:
-            usados.add(achado[0])
-            campos[nome] = achado[1]
-        else:
+    for nome, rx in RESUMO_REGEX.items():
+        v = _buscar(f.resumo, rx)
+        if v is None:
             faltando.append(nome)
+        else:
+            campos[nome] = v
     if faltando:
-        return [f"campos do resumo não localizados: {', '.join(faltando)} "
-                f"(rótulos vistos: {', '.join(sorted(mascarar(k) for k in f.resumo))})"]
+        vistos = ", ".join(sorted(mascarar(k) for k in f.resumo))
+        return Conciliacao([f"campos do resumo não localizados: {', '.join(faltando)} "
+                            f"(rótulos vistos: {vistos})"], [], campos)
 
-    div = []
+    erros: list[str] = []
+    avisos: list[str] = []
+    nao_det = ZERO
+
     esperado = sum(campos[n] for n in ("anterior", "pagamentos", "encargos", "brasil", "exterior"))
     if esperado != campos["total"]:
-        # tolera resumo que informa pagamentos como magnitude positiva
-        alt = campos["anterior"] - abs(campos["pagamentos"]) + campos["encargos"] + campos["brasil"] + campos["exterior"]
-        if alt != campos["total"]:
-            div.append(f"resumo não fecha: componentes={esperado} total informado={campos['total']} "
-                       f"(diferença {campos['total'] - esperado})")
+        erros.append(f"resumo não fecha: componentes={esperado} total informado={campos['total']} "
+                     f"(diferença {campos['total'] - esperado})")
+    total_cab = _buscar(f.cabecalho, CABECALHO_REGEX["total"])
+    if total_cab is not None and total_cab != campos["total"]:
+        erros.append(f"valor total do cabeçalho ({total_cab}) difere do total do resumo ({campos['total']})")
 
-    soma = defaultdict(Decimal)
-    for l in f.lancamentos:
-        chave = {"pagamento_fatura": "pagamentos", "encargo": "encargos",
-                 "compra": "brasil", "exterior": "exterior"}[l.tipo]
-        soma[chave] += l.valor
-    # crédito de anuidade (negativo) pertence aos encargos; pagamentos comparados em módulo
-    for nome in ("pagamentos", "encargos", "brasil", "exterior"):
-        lanc_v, res_v = soma[nome], campos[nome]
-        ok = abs(lanc_v) == abs(res_v) if nome == "pagamentos" else lanc_v == res_v
-        if not ok:
-            div.append(f"{nome}: lançamentos={lanc_v} resumo={res_v} (diferença {lanc_v - res_v})")
-    return div
+    negativos = sum((l.valor for l in f.lancamentos if l.valor < 0), ZERO)
+    if negativos != campos["pagamentos"]:
+        erros.append(f"pagamentos/créditos: lançamentos={negativos} resumo={campos['pagamentos']} "
+                     f"(diferença {negativos - campos['pagamentos']})")
+
+    positivos = sum((l.valor for l in f.lancamentos if l.valor > 0), ZERO)
+    base = campos["brasil"] + campos["exterior"]
+    if positivos == base:
+        if campos["encargos"] != 0:
+            nao_det = campos["encargos"]
+            avisos.append(f"encargos de {_brl(nao_det)} constam no resumo e NÃO estão detalhados nos "
+                          f"lançamentos (é exatamente a diferença entre resumo e lançamentos); "
+                          f"peça o detalhamento ao emissor")
+    elif positivos != base + campos["encargos"]:
+        erros.append(f"débitos: lançamentos={positivos}; resumo Brasil+exterior={base} "
+                     f"(ou {base + campos['encargos']} com encargos); diferença {positivos - base}")
+
+    ext = sum((l.valor for l in f.lancamentos if l.tipo == "exterior"), ZERO)
+    if ext != campos["exterior"]:
+        avisos.append(f"exterior: lançamentos identificados={ext} resumo={campos['exterior']} "
+                      f"(a divisão Brasil/exterior é por estabelecimento; ajuste EXTERIOR_HINTS)")
+    return Conciliacao(erros, avisos, campos, nao_det)
 
 
 def analisar(f: Fatura) -> dict:
-    """Só roda após conciliação; levanta ConciliacaoError se divergir."""
-    div = conciliar(f)
-    if div:
-        raise ConciliacaoError("; ".join(div))
+    """Só roda após conciliação; levanta ConciliacaoError se houver erro."""
+    c = conciliar(f)
+    if c.erros:
+        raise ConciliacaoError("; ".join(c.erros))
     despesas = [l for l in f.lancamentos if l.tipo in ("compra", "exterior")]
     por_cat: dict[str, Decimal] = defaultdict(Decimal)
     for l in despesas:
         por_cat[l.categoria] += l.valor
-    encargos = sum((l.valor for l in f.lancamentos if l.tipo == "encargo"), Decimal("0"))
+    try:
+        venc = parse_data(next(v for k, v in f.cabecalho.items()
+                               if re.search(CABECALHO_REGEX["vencimento"], _sem_acento(k))))
+    except (StopIteration, ValueError):
+        venc = None
+    minimo = _buscar(f.cabecalho, CABECALHO_REGEX["minimo"])
+    total = c.campos["total"]
     return {
+        "avisos": c.avisos,
+        "vencimento": venc,
+        "total_fatura": total,
+        "pagamento_minimo": minimo,
+        "saldo_se_minimo": (total - minimo) if minimo is not None else None,
         "por_categoria": dict(sorted(por_cat.items(), key=lambda kv: kv[1], reverse=True)),
-        "encargos": encargos,
+        "total_despesas": sum(por_cat.values(), ZERO),
+        "encargos_itemizados": sum((l.valor for l in f.lancamentos if l.tipo == "encargo"), ZERO),
+        "credito": sum((l.valor for l in f.lancamentos if l.tipo == "credito"), ZERO),
+        "encargos_nao_detalhados": c.encargos_nao_detalhados,
         "parcelas_em_curso": [l for l in despesas if l.parcela],
         "profissionais_a_confirmar": [l for l in despesas if l.profissional],
-        "total_despesas": sum(por_cat.values(), Decimal("0")),
     }
 
 
-def _brl(v: Decimal) -> str:
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
 def relatorio(a: dict) -> str:
-    out = ["Despesas por categoria"]
+    out: list[str] = []
+    if a["avisos"]:
+        out.append("AVISOS (leia antes dos números)")
+        out += [f"  ! {x}" for x in a["avisos"]]
+        out.append("")
+    cab = []
+    if a["vencimento"]:
+        cab.append(f"Vencimento {a['vencimento']:%d/%m/%Y}")
+    cab.append(f"Total {_brl(a['total_fatura'])}")
+    if a["pagamento_minimo"] is not None:
+        cab.append(f"Mínimo {_brl(a['pagamento_minimo'])}")
+        cab.append(f"Saldo financiado se pagar só o mínimo {_brl(a['saldo_se_minimo'])}")
+    out.append("  |  ".join(cab))
+    out.append("\nDespesas por categoria")
     for cat, v in a["por_categoria"].items():
-        out.append(f"  {cat:<24}{_brl(v):>16}")
-    out.append(f"  {'TOTAL DESPESAS':<24}{_brl(a['total_despesas']):>16}")
-    out.append(f"  {'Encargos e tarifas':<24}{_brl(a['encargos']):>16}")
+        out.append(f"  {cat:<26}{_brl(v):>16}")
+    out.append(f"  {'TOTAL DESPESAS':<26}{_brl(a['total_despesas']):>16}")
+    out.append("\nEncargos e tarifas")
+    out.append(f"  {'Itemizados':<26}{_brl(a['encargos_itemizados']):>16}")
+    out.append(f"  {'Não detalhados (resumo)':<26}{_brl(a['encargos_nao_detalhados']):>16}")
+    out.append(f"  {'Créditos (ex.: anuidade)':<26}{_brl(a['credito']):>16}")
     out.append("\nParcelas em curso (atual/total, saldo restante)")
-    for l in a["parcelas_em_curso"] or []:
-        out.append(f"  {mascarar(l.descricao[:30]):<30} {l.parcela[0]}/{l.parcela[1]}  "
-                   f"{_brl(l.valor):>14}  restam {_brl(l.saldo_restante)}")
+    for l in a["parcelas_em_curso"]:
+        resto = "última parcela" if l.parcela[0] == l.parcela[1] else f"restam {_brl(l.saldo_restante)}"
+        out.append(f"  {mascarar(l.descricao[:30]):<30} {l.parcela[0]}/{l.parcela[1]}  {_brl(l.valor):>14}  {resto}")
     if not a["parcelas_em_curso"]:
         out.append("  (nenhuma)")
     out.append("\nPossíveis despesas profissionais (a confirmar)")
-    for l in a["profissionais_a_confirmar"] or []:
+    for l in a["profissionais_a_confirmar"]:
         out.append(f"  {l.data:%d/%m/%Y}  {mascarar(l.descricao[:30]):<30} {_brl(l.valor):>14}  a confirmar")
     if not a["profissionais_a_confirmar"]:
         out.append("  (nenhum)")
