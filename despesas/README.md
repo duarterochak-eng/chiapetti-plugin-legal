@@ -26,6 +26,14 @@ com `AAAA-MM` acumula a dívida (meses devidos x valor - o que já foi pago).
 Explicar uma parcela (ex.: como Obra) vale para todas as parcelas, passadas e futuras.
 `explicar ... --valor-exato` cria regra só para aquele valor (ex.: R$ 2.509 ao mesmo favorecido de um repasse menor).
 
+## Onde ficam os dados (Google Drive do titular)
+- Pasta `Despesas/Enviar`: extratos e faturas novos (CSV; PDF quando o banco só gera PDF).
+- Pasta `Despesas/Dados`: cópia de segurança em texto (`snapshot-salvar` / `snapshot-restaurar`):
+  `lancamentos.csv`, `importacoes.csv`, `regras.json`, `config.json`.
+- Cada sessão começa restaurando a cópia e termina salvando a nova. O conector do Drive cria e lê arquivos,
+  mas não sobrescreve conteúdo: para atualizar, grava-se versão nova e a antiga vai para a lixeira.
+- A cópia contém dados financeiros: nunca vai para o git (`despesas/dados/` e `*.csv` estão no `.gitignore`).
+
 ## Fora do normal
 Para lugares já conhecidos (2+ meses de histórico), o app avisa quando o total do mês passa de 2x a média
 e de R$ 150 acima dela, e pergunta "o que foi?". Com o tempo, os lugares recorrentes ficam conhecidos.

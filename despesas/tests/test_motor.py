@@ -409,5 +409,59 @@ class ForaDoNormal(unittest.TestCase):
         self.assertNotIn("Lugar Recente", nomes)
 
 
+class CopiaDeSeguranca(unittest.TestCase):
+    def test_ida_e_volta_preserva_tudo(self):
+        a = banco()
+        a.importar_extrato(gravar(extrato_txt(OUT)))
+        a.importar_fatura(gravar(montar(RESUMO_B, LINHAS_B), "fat.csv"), "sicredi-master")
+        explicar_por_nome(a, "SOCIO TESTE", "Retirada da PJ", "renda")
+        explicar_por_nome(a, "Fulano Obra", "Extraordinárias › Obra", "despesa")
+        a.cfg["cartoes"] = ["sicredi-master", "azul"]
+        pasta = Path(tempfile.mkdtemp())
+        n = a.salvar_snapshot(pasta)
+        self.assertEqual(n["lancamentos"], a.db.execute("SELECT COUNT(*) FROM lancamentos").fetchone()[0])
+        for nome in ("lancamentos.csv", "importacoes.csv", "regras.json", "config.json"):
+            self.assertTrue((pasta / nome).exists(), nome)
+
+        b = motor.Banco(tempfile.mkdtemp())          # máquina nova, sem nada
+        b.restaurar_snapshot(pasta)
+        self.assertEqual(b.regras, a.regras)
+        self.assertEqual(b.cfg["cartoes"], ["sicredi-master", "azul"])
+        for mes in ("2026-10",):
+            ra, rb = a.resumo(mes), b.resumo(mes)
+            for k in ("entrou", "gastou", "saldo", "gastou_por_grupo", "fora_do_calculo", "parcelas_a_vencer"):
+                self.assertEqual(ra[k], rb[k], k)
+        self.assertEqual(b.parcelas(), a.parcelas())
+
+    def test_depois_de_restaurar_nao_reimporta_nem_duplica(self):
+        a = banco()
+        arq = gravar(extrato_txt(OUT))
+        a.importar_extrato(arq)
+        pasta = Path(tempfile.mkdtemp())
+        a.salvar_snapshot(pasta)
+        b = motor.Banco(tempfile.mkdtemp())
+        b.restaurar_snapshot(pasta)
+        self.assertTrue(b.importar_extrato(arq)["ja_importado"])
+        extra = OUT[:5] + [("12/10/2026", "COMPRA DEBITO MASTER PADARIA X", "CM02", "-20.00")]
+        r = b.importar_extrato(gravar(extrato_txt(extra), "g.csv"))
+        self.assertEqual((r["novos"], r["duplicados"]), (1, 5))
+
+    def test_regra_restaurada_vale_para_novos_envios(self):
+        a = banco()
+        a.importar_extrato(gravar(extrato_txt(OUT)))
+        explicar_por_nome(a, "ITAU", "Pagamento de cartão", "pagamento_cartao")
+        pasta = Path(tempfile.mkdtemp())
+        a.salvar_snapshot(pasta)
+        b = motor.Banco(tempfile.mkdtemp())
+        b.restaurar_snapshot(pasta)
+        b.importar_extrato(gravar(extrato_txt(NOV, periodo="01/11/2026 a 30/11/2026"), "n.csv"))
+        r = b.db.execute("SELECT tipo, status FROM lancamentos WHERE descricao LIKE '%ITAU%' AND mes_ref='2026-11'").fetchone()
+        self.assertEqual((r["tipo"], r["status"]), ("pagamento_cartao", "regra"))
+
+    def test_copia_incompleta_falha_com_clareza(self):
+        with self.assertRaises(ValueError):
+            motor.Banco(tempfile.mkdtemp()).restaurar_snapshot(tempfile.mkdtemp())
+
+
 if __name__ == "__main__":
     unittest.main()

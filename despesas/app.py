@@ -4,6 +4,7 @@
   pendentes                                        explicar ID "Categoria" [--tipo T] [--so-este] [--valor-exato]
   resumo AAAA-MM                                   acumulado AAAA
   lancar DD/MM/AAAA VALOR "Categoria" "descrição" [--tipo renda]      (dinheiro, outro banco)
+  snapshot-salvar PASTA | snapshot-restaurar PASTA   (cópia de segurança em texto, para o Drive)
   recorrencias                                     parcelas   (compras parceladas e saldo a vencer)
   config [--documento CPF] [--cartao NOME] [--limite N] [--base fatura|compra]
          [--esperado "Categoria|Nome|VALOR[|AAAA-MM]"]
@@ -42,6 +43,8 @@ def main(argv=None) -> int:
     a.add_argument("descricao"); a.add_argument("--tipo", default="despesa")
     sub.add_parser("recorrencias")
     sub.add_parser("parcelas")
+    a = sub.add_parser("snapshot-salvar"); a.add_argument("pasta")
+    a = sub.add_parser("snapshot-restaurar"); a.add_argument("pasta")
     a = sub.add_parser("config"); a.add_argument("--documento", action="append"); a.add_argument("--cartao", action="append")
     a.add_argument("--limite"); a.add_argument("--base", choices=("fatura", "compra")); a.add_argument("--esperado", action="append")
     args = p.parse_args(argv)
@@ -90,6 +93,13 @@ def main(argv=None) -> int:
             d, m, y = map(int, args.data.split("/"))
             b.lancar(motor.date(y, m, d), _valor(args.valor), args.categoria, args.descricao, args.tipo)
             print("lançado")
+        elif args.cmd == "snapshot-salvar":
+            n = b.salvar_snapshot(args.pasta)
+            print(f"cópia de segurança salva: {n['lancamentos']} lançamentos, {n['importacoes']} importações, regras e config")
+        elif args.cmd == "snapshot-restaurar":
+            n = b.restaurar_snapshot(args.pasta)
+            print(f"cópia restaurada: {n['lancamentos']} lançamentos, {n['importacoes']} importações, "
+                  f"{len(b.regras)} regra(s)")
         elif args.cmd == "parcelas":
             ps = b.parcelas()
             for x in ps:

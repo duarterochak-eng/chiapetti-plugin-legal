@@ -7,6 +7,7 @@ Tipos: despesa | renda | transferencia | pagamento_cartao. Os dois últimos fica
 from __future__ import annotations
 
 import calendar
+import csv
 import hashlib
 import json
 import re
@@ -217,6 +218,53 @@ class Banco:
     def pendentes(self):
         return self.db.execute("SELECT * FROM lancamentos WHERE status='pendente' "
                                "ORDER BY ABS(CAST(valor AS REAL)) DESC").fetchall()
+
+    # -- cópia de segurança (arquivos de texto, para guardar no Drive) -------------------
+    COLUNAS_LANC = ("id", "origem", "conta", "data", "descricao", "doc", "valor", "sugestao", "chave", "tipo",
+                    "categoria", "status", "mes_ref", "nota")
+    COLUNAS_IMP = ("hash", "tipo", "conta", "inicio", "fim", "novos", "duplicados")
+
+    def salvar_snapshot(self, pasta) -> dict:
+        """Grava tudo que o app sabe em 4 arquivos de texto: lancamentos.csv, importacoes.csv, regras.json, config.json."""
+        pasta = Path(pasta)
+        pasta.mkdir(parents=True, exist_ok=True)
+        n = {}
+        for nome, tabela, colunas, ordem in (("lancamentos", "lancamentos", self.COLUNAS_LANC, "data, id"),
+                                             ("importacoes", "importacoes", self.COLUNAS_IMP, "hash")):
+            rows = self.db.execute(f"SELECT {', '.join(colunas)} FROM {tabela} ORDER BY {ordem}").fetchall()
+            with open(pasta / f"{nome}.csv", "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(colunas)
+                w.writerows(["" if v is None else v for v in r] for r in rows)
+            n[nome] = len(rows)
+        (pasta / "regras.json").write_text(json.dumps(self.regras, ensure_ascii=False, indent=2), encoding="utf-8")
+        (pasta / "config.json").write_text(json.dumps(self.cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        return n
+
+    def restaurar_snapshot(self, pasta) -> dict:
+        """Recarrega uma cópia de segurança (o que está na cópia prevalece sobre o que já existir)."""
+        pasta = Path(pasta)
+        n = {}
+        for nome, tabela, colunas in (("lancamentos", "lancamentos", self.COLUNAS_LANC),
+                                      ("importacoes", "importacoes", self.COLUNAS_IMP)):
+            arq = pasta / f"{nome}.csv"
+            if not arq.exists():
+                raise ValueError(f"cópia de segurança incompleta: falta {nome}.csv")
+            with open(arq, encoding="utf-8", newline="") as f:
+                rows = list(csv.DictReader(f))
+            for r in rows:
+                vals = [(r[c] if r[c] != "" else None) for c in colunas]
+                if tabela == "importacoes":
+                    vals[5], vals[6] = int(vals[5] or 0), int(vals[6] or 0)
+                self.db.execute(f"INSERT OR REPLACE INTO {tabela} VALUES ({','.join('?' * len(colunas))})", vals)
+            n[nome] = len(rows)
+        self.db.commit()
+        self.regras = json.loads((pasta / "regras.json").read_text(encoding="utf-8")) if (pasta / "regras.json").exists() else []
+        self.cfg = {**CONFIG_PADRAO, **(json.loads((pasta / "config.json").read_text(encoding="utf-8"))
+                                        if (pasta / "config.json").exists() else {})}
+        self._gravar("regras.json", self.regras)
+        self.salvar_config()
+        return n
 
     # -- leitura ----------------------------------------------------------------------
     def resumo(self, mes: str) -> dict:
